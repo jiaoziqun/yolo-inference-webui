@@ -1,4 +1,4 @@
-![last_commit](https://img.shields.io/github/last-commit/jiaoziqun/action_test)
+![last_commit](https://img.shields.io/github/last-commit/jiaoziqun/yolo-inference-webui)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 本项目利用FastAPI、Vue以及YOLOv5搭建了一个本地前端网页模型推理平台
