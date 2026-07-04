@@ -1,0 +1,8 @@
+services:
+  fastapi:
+    build: .
+    ports:
+      - "8000:8000" #把宿主机的端口 ： 转发到容器端口
+    image : v5detect:v1.0
+    container_name: fastapi_v5detect
+    restart: unless-stopped
