@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YOLOv5 目标检测</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+        .container { max-width: 900px; margin: 0 auto; padding: 32px 16px; }
+        h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 24px; display: flex; align-items: center; gap: 10px; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; background: #22c55e; }
+        .dot.off { background: #ef4444; }
+
+        .upload-zone {
+            border: 2px dashed #334155; border-radius: 12px; padding: 48px; text-align: center;
+            cursor: pointer; transition: border-color .2s; margin-bottom: 24px;
+        }
+        .upload-zone:hover, .upload-zone.dragover { border-color: #3b82f6; background: #1e293b; }
+        .upload-zone p { color: #94a3b8; font-size: .95rem; }
+
+        .main-area { display: flex; gap: 24px; flex-wrap: wrap; }
+        .canvas-box { flex: 1 1 500px; min-width: 300px; position: relative; }
+        .canvas-box img, .canvas-box canvas { width: 100%; border-radius: 8px; display: block; }
+        .canvas-box canvas { position: absolute; top: 0; left: 0; }
+
+        .results-panel { flex: 0 0 260px; }
+        .results-panel h2 { font-size: 1rem; margin-bottom: 12px; color: #94a3b8; }
+
+        .card {
+            background: #1e293b; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px;
+            border-left: 4px solid #3b82f6; font-size: .9rem;
+        }
+        .card .cls { font-weight: 600; color: #f1f5f9; }
+        .card .conf { color: #22c55e; margin-left: 8px; font-size: .82rem; }
+        .card .bbox { color: #64748b; font-size: .78rem; margin-top: 4px; }
+
+        .btn {
+            display: inline-block; padding: 10px 24px; border-radius: 8px; border: none;
+            cursor: pointer; font-size: .9rem; font-weight: 500; transition: opacity .2s;
+        }
+        .btn-primary { background: #3b82f6; color: #fff; }
+        .btn-primary:hover { opacity: .85; }
+        .btn:disabled { opacity: .4; cursor: not-allowed; }
+
+        .stats { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+        .stat { background: #1e293b; border-radius: 8px; padding: 12px 20px; }
+        .stat .val { font-size: 1.3rem; font-weight: 700; color: #3b82f6; }
+        .stat .lbl { font-size: .75rem; color: #64748b; margin-top: 2px; }
+    </style>
+</head>
+<body>
+<div id="app">
+    <div class="container">
+        <h1>
+            YOLOv5s 目标检测
+            <span :class="['dot', status === 'ok' ? '' : 'off']"
+                  :title="status === 'ok' ? '模型就绪' : '检测中...'"></span>
+        </h1>
+
+        <!-- 上传区 -->
+        <div class="upload-zone"
+             :class="{ dragover: dragging }"
+             @click="$refs.fileInput.click()"
+             @dragover.prevent="dragging = true"
+             @dragleave="dragging = false"
+             @drop.prevent="onDrop">
+            <p v-if="!imageSrc">📁 点击选择图片，或拖拽图片到这里</p>
+            <p v-else>📁 点击或拖拽更换图片</p>
+        </div>
+        <input ref="fileInput" type="file" accept="image/*" hidden @change="onFileChange" />
+
+        <div class="stats" v-if="detections.length">
+            <div class="stat">
+                <div class="val">{{ detections.length }}</div>
+                <div class="lbl">检测目标数</div>
+            </div>
+            <div class="stat">
+                <div class="val">{{ elapsed }}ms</div>
+                <div class="lbl">推理耗时</div>
+            </div>
+        </div>
+
+        <div class="main-area" v-if="imageSrc">
+            <!-- 画布区 -->
+            <div class="canvas-box">
+                <img ref="img" :src="imageSrc" @load="drawBoxes" alt="检测图片" />
+                <canvas ref="canvas"></canvas>
+            </div>
+
+            <!-- 结果列表 -->
+            <div class="results-panel">
+                <h2>检测结果</h2>
+                <div v-if="loading">检测中...</div>
+                <div v-else-if="detections.length === 0" style="color:#64748b">未检测到目标</div>
+                <div class="card" v-for="(d, i) in detections" :key="i">
+                    <span class="cls">{{ d.class }}</span>
+                    <span class="conf">{{ (d.confidence * 100).toFixed(1) }}%</span>
+                    <div class="bbox">x:{{ d.bbox[0].toFixed(0) }} y:{{ d.bbox[1].toFixed(0) }} {{ d.bbox[2].toFixed(0) }}×{{ d.bbox[3].toFixed(0) }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const { createApp, ref, nextTick } = Vue
+
+createApp({
+    setup() {
+        const imageSrc = ref('')
+        const detections = ref([])
+        const loading = ref(false)
+        const dragging = ref(false)
+        const status = ref('ok')
+        const elapsed = ref(0)
+
+        const img = ref(null)
+        const canvas = ref(null)
+
+        const COLORS = ['#3b82f6','#22c55e','#eab308','#ef4444','#a855f7','#ec4899',
+                         '#14b8a6','#f97316','#6366f1','#84cc16']
+
+        async function detect(file) {
+            loading.value = true
+            const t0 = performance.now()
+            try {
+                const form = new FormData()
+                form.append('file', file)
+                const res = await fetch('/detect', { method: 'POST', body: form })
+                const data = await res.json()
+                // data 是数组 [{ success, detections, count }]
+                if (data.length && data[0].success) {
+                    detections.value = data[0].detections
+                } else {
+                    detections.value = []
+                }
+            } catch (e) {
+                console.error(e)
+                detections.value = []
+            }
+            elapsed.value = Math.round(performance.now() - t0)
+            loading.value = false
+            await nextTick()
+            drawBoxes()
+        }
+
+        function drawBoxes() {
+            if (!img.value || !canvas.value) return
+            const i = img.value
+            const c = canvas.value
+            c.width = i.naturalWidth
+            c.height = i.naturalHeight
+            c.style.width = i.clientWidth + 'px'
+            c.style.height = i.clientHeight + 'px'
+            const ctx = c.getContext('2d')
+            ctx.clearRect(0, 0, c.width, c.height)
+
+            const scaleX = c.width / i.clientWidth
+            const scaleY = c.height / i.clientHeight
+
+            detections.value.forEach((d, idx) => {
+                const [x, y, w, h] = d.bbox
+                const color = COLORS[idx % COLORS.length]
+                ctx.strokeStyle = color
+                ctx.lineWidth = Math.max(2, c.width / 300)
+                ctx.strokeRect(x, y, w, h)
+
+                // 标签
+                const label = `${d.class} ${(d.confidence * 100).toFixed(0)}%`
+                ctx.font = `${Math.max(12, c.width / 60)}px system-ui`
+                const m = ctx.measureText(label)
+                ctx.fillStyle = color
+                ctx.fillRect(x, y - 22, m.width + 10, 22)
+                ctx.fillStyle = '#fff'
+                ctx.fillText(label, x + 4, y - 6)
+            })
+        }
+
+        function loadImage(file) {
+            const reader = new FileReader()
+            reader.onload = e => { imageSrc.value = e.target.result }
+            reader.readAsDataURL(file)
+        }
+
+        function onFileChange(e) {
+            const file = e.target.files[0]
+            if (!file) return
+            loadImage(file)
+            detect(file)
+        }
+
+        function onDrop(e) {
+            dragging.value = false
+            const file = e.dataTransfer.files[0]
+            if (!file) return
+            loadImage(file)
+            detect(file)
+        }
+
+        // 健康检查
+        fetch('/health').then(r => r.json()).then(d => {
+            status.value = d.model_loaded ? 'ok' : 'off'
+        }).catch(() => { status.value = 'off' })
+
+        return { imageSrc, detections, loading, dragging, status, elapsed,
+                 img, canvas, onFileChange, onDrop, drawBoxes }
+    }
+}).mount('#app')
+</script>
+</body>
+</html>

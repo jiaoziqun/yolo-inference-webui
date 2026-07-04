@@ -24,8 +24,6 @@ VOC/
 *.mat
 
 # Neural Network weights -----------------------------------------------------------------------------------------------
-*.weights
-*.pt
 *.pb
 *.onnx
 *.engine
@@ -185,7 +183,6 @@ Temporary Items
 .idea/**/workspace.xml
 .idea/**/tasks.xml
 .idea/dictionaries
-*.html
 *.pg
 
 # Sensitive or high-churn files:
